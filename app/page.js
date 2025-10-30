@@ -42,6 +42,14 @@ export default function Home() {
         adjustTextareaHeight();
     }, [text]);
 
+    // 當文字改變時，清空音檔緩存
+    useEffect(() => {
+        // 清空緩存
+        audioCacheRef.current = new Map();
+        setAudioCache(new Map());
+        console.log('[CACHE] 文字已改變，清空所有音檔緩存');
+    }, [text]);
+
     // 保存 API Key
     const handleSaveApiKey = () => {
         console.log('[SETTINGS] 保存 API Key');
@@ -535,17 +543,17 @@ export default function Home() {
                                     const regenerateButtonEnabled = !apiKey || isPlayingRef.current || !isCached ? false : !isGenerating;
 
                                     // 播放按鈕邏輯：
-                                    // 1. 如果有任何段落正在生成 → 全部禁用
-                                    // 2. 如果正在播放該段 → 可點擊（暫停）
+                                    // 1. 如果正在播放該段 → 可點擊（暫停）
+                                    // 2. 如果有任何段落正在生成 → 全部禁用
                                     // 3. 如果有其他段落正在播放 → 禁用
                                     // 4. 第一個段落永遠可點擊（引導使用者從這裡開始）
                                     // 5. 其他段落需要已緩存才能點擊
                                     const playButtonEnabled = !apiKey
                                         ? false
-                                        : hasAnyGenerating
-                                            ? false
-                                            : isPlaying
-                                                ? true
+                                        : isPlaying
+                                            ? true
+                                            : hasAnyGenerating
+                                                ? false
                                                 : isAnyOtherPlaying
                                                     ? false
                                                     : isFirstLine
@@ -556,8 +564,8 @@ export default function Home() {
                                         <div
                                             key={index}
                                             className={`flex gap-3 p-3 rounded-lg border transition-colors ${isPlaying
-                                                ? 'border-black bg-blue-50'
-                                                : 'border-gray-300 bg-gray-50'
+                                                ? 'border-yellow-500 bg-yellow-50'
+                                                : 'border-gray-300 bg-white'
                                                 }`}
                                         >
                                             {/* 序號 - 正方形 */}
@@ -575,12 +583,11 @@ export default function Home() {
                                                 <button
                                                     onClick={() => handleRegenerateLine(index)}
                                                     disabled={!regenerateButtonEnabled}
-                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${isGenerating
-                                                        ? 'bg-gray-300 cursor-not-allowed'
-                                                        : regenerateButtonEnabled
-                                                            ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
-                                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${regenerateButtonEnabled
+                                                        ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                        : 'cursor-not-allowed'
                                                         }`}
+                                                    style={!regenerateButtonEnabled ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
                                                     title={
                                                         !apiKey
                                                             ? '請先設定 API Key'
@@ -606,21 +613,20 @@ export default function Home() {
                                                 <button
                                                     onClick={() => handlePlayFromLine(index)}
                                                     disabled={!playButtonEnabled}
-                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${!apiKey
-                                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                        : hasAnyGenerating
-                                                            ? 'bg-gray-300 cursor-not-allowed'
-                                                            : playButtonEnabled
-                                                                ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
-                                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${isPlaying
+                                                        ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                        : playButtonEnabled
+                                                            ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                            : 'cursor-not-allowed'
                                                         }`}
+                                                    style={!playButtonEnabled ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
                                                     title={
                                                         !apiKey
                                                             ? '請先設定 API Key'
-                                                            : hasAnyGenerating
-                                                                ? '生成中，請稍候...'
-                                                                : isPlaying
-                                                                    ? '暫停'
+                                                            : isPlaying
+                                                                ? '暫停'
+                                                                : hasAnyGenerating
+                                                                    ? '生成中，請稍候...'
                                                                     : isAnyOtherPlaying
                                                                         ? '其他段落播放中'
                                                                         : isFirstLine
