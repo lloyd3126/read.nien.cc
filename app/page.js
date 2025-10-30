@@ -9,6 +9,9 @@ export default function Home() {
     const [showModal, setShowModal] = useState(false);
     const [apiKey, setApiKey] = useState('');
     const [tempApiKey, setTempApiKey] = useState('');
+    const [totalLines, setTotalLines] = useState(0);
+    const [generatedCount, setGeneratedCount] = useState(0);
+    const [playingIndex, setPlayingIndex] = useState(0);
     const audioContextRef = useRef(null);
     const currentAudioRef = useRef(null);
     const isPlayingRef = useRef(false);
@@ -271,46 +274,75 @@ export default function Home() {
         const lines = splitText(text);
         console.log('[BUTTON] 分割文本:', lines);
 
+        setTotalLines(lines.length);
+        setGeneratedCount(0);
+        setPlayingIndex(0);
         setIsPlaying(true);
         isPlayingRef.current = true;
 
         try {
-            // 第一步：生成所有音頻 Blob
-            console.log('[BUTTON] 開始生成所有語音...');
-            const audioBlobs = [];
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                console.log(`[BUTTON] 生成第 ${i + 1}/${lines.length} 行:`, line);
+            console.log('[BUTTON] 開始邊生成邊播放語音，每批 5 段...');
+            const CONCURRENT_BATCH_SIZE = 5;
+            let generatedSoFar = 0;
 
+            for (let i = 0; i < lines.length; i += CONCURRENT_BATCH_SIZE) {
                 if (!isPlayingRef.current) {
-                    console.log('[BUTTON] 生成已被停止');
+                    console.log('[BUTTON] 流程已被停止');
                     break;
                 }
 
-                const blob = await textToSpeech(line);
-                if (blob) {
-                    audioBlobs.push(blob);
-                    console.log(`[BUTTON] 第 ${i + 1} 行生成完成，大小: ${blob.size} bytes`);
-                } else {
-                    console.warn(`[BUTTON] 第 ${i + 1} 行生成失敗`);
+                const batchEnd = Math.min(i + CONCURRENT_BATCH_SIZE, lines.length);
+                const batch = lines.slice(i, batchEnd);
+                console.log(`[BUTTON] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批：開始並發生成第 ${i + 1}-${batchEnd}/${lines.length} 行（共 ${batch.length} 段）`);
+
+                // 並發生成這一批文本
+                const batchPromises = batch.map((line, batchIndex) => {
+                    const lineIndex = i + batchIndex;
+                    console.log(`[BUTTON] 發起請求：第 ${lineIndex + 1}/${lines.length} 行: ${line}`);
+                    return textToSpeech(line)
+                        .then((blob) => {
+                            if (blob) {
+                                console.log(`[BUTTON] 第 ${lineIndex + 1} 行生成完成，大小: ${blob.size} bytes`);
+                                generatedSoFar++;
+                                setGeneratedCount(generatedSoFar);
+                                return { index: lineIndex, blob };
+                            } else {
+                                console.warn(`[BUTTON] 第 ${lineIndex + 1} 行生成失敗`);
+                                generatedSoFar++;
+                                setGeneratedCount(generatedSoFar);
+                                return { index: lineIndex, blob: null };
+                            }
+                        })
+                        .catch((error) => {
+                            console.error(`[BUTTON] 第 ${lineIndex + 1} 行生成錯誤:`, error);
+                            generatedSoFar++;
+                            setGeneratedCount(generatedSoFar);
+                            return { index: lineIndex, blob: null };
+                        });
+                });
+
+                // 等待這一批全部完成
+                const batchResults = await Promise.all(batchPromises);
+                console.log(`[BUTTON] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批生成完成`);
+
+                // 播放這一批的音頻（按照原始順序）
+                console.log(`[BUTTON] 開始播放第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批...`);
+                for (const result of batchResults) {
+                    if (!isPlayingRef.current) {
+                        console.log('[BUTTON] 播放已被停止');
+                        return;
+                    }
+
+                    if (result.blob) {
+                        setPlayingIndex(result.index + 1);
+                        const isLastBlob = result.index === lines.length - 1;
+                        const delay = isLastBlob ? 0 : 200;
+                        console.log(`[BUTTON] 播放第 ${result.index + 1}/${lines.length} 個音檔`);
+                        await playBlob(result.blob, delay);
+                    } else {
+                        console.warn(`[BUTTON] 跳過第 ${result.index + 1} 行（生成失敗）`);
+                    }
                 }
-            }
-
-            console.log(`[BUTTON] 所有語音生成完成，共 ${audioBlobs.length} 個音檔`);
-
-            // 第二步：逐個播放所有音頻
-            console.log('[BUTTON] 開始播放所有語音...');
-            for (let i = 0; i < audioBlobs.length; i++) {
-                if (!isPlayingRef.current) {
-                    console.log('[BUTTON] 播放已被停止');
-                    break;
-                }
-
-                console.log(`[BUTTON] 播放第 ${i + 1}/${audioBlobs.length} 個音檔`);
-                // 最後一段不需要延遲
-                const isLastBlob = i === audioBlobs.length - 1;
-                const delay = isLastBlob ? 0 : 200;
-                await playBlob(audioBlobs[i], delay);
             }
 
             console.log('[BUTTON] 所有音檔播放完成');
@@ -353,6 +385,26 @@ export default function Home() {
                         </button>
                     </div>
                 </div>
+
+                {/* 進度顯示 */}
+                {isPlaying && (
+                    <div className="mb-6 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg border-2 border-indigo-200">
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="text-center">
+                                <div className="text-sm font-medium text-gray-600 mb-1">總段落數</div>
+                                <div className="text-2xl font-bold text-indigo-600">{totalLines}</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-sm font-medium text-gray-600 mb-1">已經生成</div>
+                                <div className="text-2xl font-bold text-blue-600">{generatedCount}</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-sm font-medium text-gray-600 mb-1">正在播放</div>
+                                <div className="text-2xl font-bold text-purple-600">{playingIndex}</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* 編輯區 */}
                 <div className="mb-4">
