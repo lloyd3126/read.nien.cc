@@ -359,7 +359,7 @@ export default function Home() {
             <div className="w-full">
                 {/* 標題 */}
                 <div className="mb-6 text-center">
-                    <h1 className="text-3xl font-bold text-gray-800 mb-6">Text to Speech</h1>
+                    <h1 className="text-3xl font-bold text-black mb-6">Text to Speech</h1>
                     {/* 按鈕區 */}
                     <div className="flex gap-3 items-center justify-center">
                         {/* 設定按鈕 */}
@@ -368,7 +368,7 @@ export default function Home() {
                                 setTempApiKey(apiKey);
                                 setShowModal(true);
                             }}
-                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black hover:bg-gray-800 text-white transition-colors"
+                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black hover:bg-gray-900 text-white transition-colors"
                             title="設定"
                         >
                             <Settings size={24} />
@@ -378,7 +378,7 @@ export default function Home() {
                         <button
                             onClick={handlePlayClick}
                             disabled={!apiKey}
-                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black hover:bg-gray-800 text-white transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black hover:bg-gray-900 text-white transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                             title={isPlaying ? '暫停' : '播放'}
                         >
                             {isPlaying ? <Pause size={24} /> : <Play size={24} />}
@@ -388,19 +388,19 @@ export default function Home() {
 
                 {/* 進度顯示 */}
                 {isPlaying && (
-                    <div className="mb-6 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg border-2 border-indigo-200">
+                    <div className="mb-6 p-4 bg-white rounded-lg border-2 border-black">
                         <div className="grid grid-cols-3 gap-4">
                             <div className="text-center">
-                                <div className="text-sm font-medium text-gray-600 mb-1">總段落數</div>
-                                <div className="text-2xl font-bold text-indigo-600">{totalLines}</div>
+                                <div className="text-sm font-medium text-black mb-1">總段落數</div>
+                                <div className="text-2xl font-bold text-black">{totalLines}</div>
                             </div>
                             <div className="text-center">
-                                <div className="text-sm font-medium text-gray-600 mb-1">已經生成</div>
-                                <div className="text-2xl font-bold text-blue-600">{generatedCount}</div>
+                                <div className="text-sm font-medium text-black mb-1">已經生成</div>
+                                <div className="text-2xl font-bold text-black">{generatedCount}</div>
                             </div>
                             <div className="text-center">
-                                <div className="text-sm font-medium text-gray-600 mb-1">正在播放</div>
-                                <div className="text-2xl font-bold text-purple-600">{playingIndex}</div>
+                                <div className="text-sm font-medium text-black mb-1">正在播放</div>
+                                <div className="text-2xl font-bold text-black">{playingIndex}</div>
                             </div>
                         </div>
                     </div>
@@ -415,9 +415,9 @@ export default function Home() {
                         placeholder="在此輸入要轉換的文字，按換行分段..."
                         suppressHydrationWarning
                         rows={10}
-                        className={`w-full p-4 rounded-lg border-2 border-gray-300 focus:border-indigo-500 focus:outline-none resize-y transition-all ${isPlaying
-                            ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
-                            : 'bg-white text-gray-800'
+                        className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-y transition-all ${isPlaying
+                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                            : 'bg-white text-black'
                             }`}
                     />
                 </div>
@@ -427,9 +427,9 @@ export default function Home() {
             {showModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-                        <h2 className="text-2xl font-bold mb-4 text-gray-800">API 金鑰設定</h2>
+                        <h2 className="text-2xl font-bold mb-4 text-black">API 金鑰設定</h2>
 
-                        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+                        <div className="mb-4 p-3 bg-gray-100 border border-black rounded text-sm text-black">
                             <p className="font-semibold mb-1">⚠️ 重要提示</p>
                             <p>
                                 本專案完全在前端運行，沒有後端伺服器。API
@@ -442,25 +442,25 @@ export default function Home() {
                             value={tempApiKey}
                             onChange={(e) => setTempApiKey(e.target.value)}
                             placeholder="輸入 Gemini API Key"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none mb-4"
+                            className="w-full px-4 py-2 border border-black rounded-lg focus:border-black focus:outline-none mb-4 bg-white text-black"
                         />
 
                         <div className="flex gap-3">
                             <button
                                 onClick={handleClearApiKey}
-                                className="flex-1 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium"
+                                className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
                             >
                                 清除
                             </button>
                             <button
                                 onClick={() => setShowModal(false)}
-                                className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors font-medium"
+                                className="flex-1 px-4 py-2 bg-gray-300 text-black rounded-lg hover:bg-gray-400 transition-colors font-medium"
                             >
                                 取消
                             </button>
                             <button
                                 onClick={handleSaveApiKey}
-                                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
+                                className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
                             >
                                 保存
                             </button>
