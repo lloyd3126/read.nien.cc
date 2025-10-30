@@ -1,18 +1,20 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Settings, BookHeadphones, SquarePen, RotateCcw } from 'lucide-react';
+import { Play, Pause, Settings, BookHeadphones, SquarePen, RotateCcw, Loader2 } from 'lucide-react';
 
 export default function Home() {
     const [text, setText] = useState('');
-    const [isPlaying, setIsPlaying] = useState(false);
     const [apiKey, setApiKey] = useState('');
     const [tempApiKey, setTempApiKey] = useState('');
-    const [totalLines, setTotalLines] = useState(0);
-    const [generatedCount, setGeneratedCount] = useState(0);
-    const [playingIndex, setPlayingIndex] = useState(0);
     const [viewMode, setViewMode] = useState('edit'); // 'edit', 'read', 'settings'
-    const audioContextRef = useRef(null);
+
+    // 音檔緩存機制
+    const [audioCache, setAudioCache] = useState(new Map()); // Map<lineIndex, blob> - 用於 UI 顯示
+    const audioCacheRef = useRef(new Map()); // 即時緩存 - 用於播放邏輯
+    const [generatingLines, setGeneratingLines] = useState(new Set()); // Set<lineIndex>
+    const [currentPlayingLine, setCurrentPlayingLine] = useState(null); // 當前播放的行索引
+
     const currentAudioRef = useRef(null);
     const isPlayingRef = useRef(false);
     const textareaRef = useRef(null);
@@ -262,141 +264,201 @@ export default function Home() {
         });
     };
 
-    // 處理播放按鈕
-    const handlePlayClick = async () => {
-        console.log('[BUTTON] 播放按鈕被點擊，當前狀態:', { isPlaying, apiKey: !!apiKey, text: text.length });
+    // 單段重新生成
+    const handleRegenerateLine = async (lineIndex) => {
+        console.log('[REGENERATE] 重新生成第', lineIndex + 1, '段');
 
-        if (isPlaying) {
-            // 停止播放
-            console.log('[BUTTON] 停止播放');
+        if (!apiKey) {
+            alert('請先設定 API Key');
+            return;
+        }
+
+        const lines = splitText(text);
+        const lineText = lines[lineIndex];
+
+        // 標記為生成中
+        setGeneratingLines(prev => new Set(prev).add(lineIndex));
+
+        try {
+            const blob = await textToSpeech(lineText);
+            if (blob) {
+                // 同時更新 ref 和 state
+                audioCacheRef.current.set(lineIndex, blob);
+                setAudioCache(new Map(audioCacheRef.current));
+                console.log('[REGENERATE] 第', lineIndex + 1, '段重新生成成功');
+            } else {
+                console.error('[REGENERATE] 第', lineIndex + 1, '段重新生成失敗');
+            }
+        } catch (error) {
+            console.error('[REGENERATE] 錯誤:', error);
+        } finally {
+            // 移除生成中標記
+            setGeneratingLines(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(lineIndex);
+                return newSet;
+            });
+        }
+    };
+
+    // 從該段後繼續播放
+    const handlePlayFromLine = async (startIndex) => {
+        console.log('[PLAY_FROM] 從第', startIndex + 1, '段開始播放');
+
+        if (!apiKey) {
+            alert('請先設定 API Key');
+            return;
+        }
+
+        // 如果正在播放該段，則暫停
+        if (currentPlayingLine === startIndex && isPlayingRef.current) {
+            console.log('[PLAY_FROM] 暫停播放');
             isPlayingRef.current = false;
             if (currentAudioRef.current) {
                 currentAudioRef.current.pause();
                 currentAudioRef.current = null;
             }
-            setIsPlaying(false);
+            setCurrentPlayingLine(null);
             return;
         }
 
-        if (!text.trim()) {
-            console.warn('[BUTTON] 編輯區為空');
-            alert('請輸入文字');
-            return;
+        // 停止當前播放
+        if (isPlayingRef.current) {
+            isPlayingRef.current = false;
+            if (currentAudioRef.current) {
+                currentAudioRef.current.pause();
+                currentAudioRef.current = null;
+            }
         }
 
         const lines = splitText(text);
-        console.log('[BUTTON] 分割文本:', lines);
-
-        setTotalLines(lines.length);
-        setGeneratedCount(0);
-        setPlayingIndex(0);
-        setIsPlaying(true);
         isPlayingRef.current = true;
 
         try {
-            console.log('[BUTTON] 開始邊生成邊播放語音（並行執行），每批 5 段...');
             const CONCURRENT_BATCH_SIZE = 5;
-            let generatedSoFar = 0;
 
-            // 用於存儲已生成但未播放的 blobs
-            const blobQueue = new Map();
-            let nextPlayIndex = 0;
+            // 生成任務：批次生成缺失的音檔
+            const generateTask = async () => {
+                // 檢查需要生成的段落
+                const linesToGenerate = [];
+                for (let i = startIndex; i < lines.length; i++) {
+                    if (!audioCacheRef.current.has(i)) {
+                        linesToGenerate.push(i);
+                    }
+                }
 
-            // 生成任務隊列
-            const generateBatches = async () => {
-                for (let i = 0; i < lines.length; i += CONCURRENT_BATCH_SIZE) {
+                if (linesToGenerate.length === 0) {
+                    console.log('[GENERATE] 所有音檔已緩存');
+                    return;
+                }
+
+                console.log('[GENERATE] 需要生成', linesToGenerate.length, '段音檔');
+
+                for (let i = 0; i < linesToGenerate.length; i += CONCURRENT_BATCH_SIZE) {
                     if (!isPlayingRef.current) {
-                        console.log('[GENERATE] 生成流程已被停止');
+                        console.log('[GENERATE] 播放已停止，中止生成');
                         break;
                     }
 
-                    const batchEnd = Math.min(i + CONCURRENT_BATCH_SIZE, lines.length);
-                    const batch = lines.slice(i, batchEnd);
-                    console.log(`[GENERATE] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批：開始並發生成第 ${i + 1}-${batchEnd}/${lines.length} 行（共 ${batch.length} 段）`);
+                    const batchEnd = Math.min(i + CONCURRENT_BATCH_SIZE, linesToGenerate.length);
+                    const batch = linesToGenerate.slice(i, batchEnd);
+                    console.log(`[GENERATE] 批次生成第 ${batch[0] + 1}-${batch[batch.length - 1] + 1} 段`);
 
-                    // 並發生成這一批文本
-                    const batchPromises = batch.map((line, batchIndex) => {
-                        const lineIndex = i + batchIndex;
-                        console.log(`[GENERATE] 發起請求：第 ${lineIndex + 1}/${lines.length} 行: ${line}`);
-                        return textToSpeech(line)
-                            .then((blob) => {
-                                if (blob) {
-                                    console.log(`[GENERATE] 第 ${lineIndex + 1} 行生成完成，大小: ${blob.size} bytes`);
-                                    generatedSoFar++;
-                                    setGeneratedCount(generatedSoFar);
-                                    return { index: lineIndex, blob };
-                                } else {
-                                    console.warn(`[GENERATE] 第 ${lineIndex + 1} 行生成失敗`);
-                                    generatedSoFar++;
-                                    setGeneratedCount(generatedSoFar);
-                                    return { index: lineIndex, blob: null };
-                                }
-                            })
-                            .catch((error) => {
-                                console.error(`[GENERATE] 第 ${lineIndex + 1} 行生成錯誤:`, error);
-                                generatedSoFar++;
-                                setGeneratedCount(generatedSoFar);
-                                return { index: lineIndex, blob: null };
-                            });
+                    // 標記為生成中
+                    batch.forEach(lineIndex => {
+                        setGeneratingLines(prev => new Set(prev).add(lineIndex));
                     });
 
-                    // 等待這一批全部完成
-                    const batchResults = await Promise.all(batchPromises);
-                    console.log(`[GENERATE] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批生成完成`);
+                    // 並發生成這一批
+                    const batchPromises = batch.map(async (lineIndex) => {
+                        const lineText = lines[lineIndex];
+                        try {
+                            const blob = await textToSpeech(lineText);
+                            if (blob) {
+                                // 立即更新 ref
+                                audioCacheRef.current.set(lineIndex, blob);
+                                // 更新 state 供 UI 顯示
+                                setAudioCache(new Map(audioCacheRef.current));
+                                console.log(`[GENERATE] 第 ${lineIndex + 1} 段生成完成`);
+                                return { index: lineIndex, blob };
+                            }
+                        } catch (error) {
+                            console.error(`[GENERATE] 第 ${lineIndex + 1} 段生成錯誤:`, error);
+                        } finally {
+                            // 移除生成中標記
+                            setGeneratingLines(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(lineIndex);
+                                return newSet;
+                            });
+                        }
+                        return { index: lineIndex, blob: null };
+                    });
 
-                    // 將結果存入隊列
-                    for (const result of batchResults) {
-                        blobQueue.set(result.index, result.blob);
-                    }
+                    await Promise.all(batchPromises);
                 }
 
-                // 標記生成完成
-                blobQueue.set('_GENERATION_COMPLETE', true);
                 console.log('[GENERATE] 所有音檔生成完成');
             };
 
-            // 播放任務隊列
-            const playBatches = async () => {
-                while (nextPlayIndex < lines.length) {
+            // 播放任務：依序播放
+            const playTask = async () => {
+                // 先等待第一批（起始的 5 段或到結尾）生成完成
+                const firstBatchEnd = Math.min(startIndex + CONCURRENT_BATCH_SIZE, lines.length);
+                console.log(`[PLAY] 等待第一批（第 ${startIndex + 1}-${firstBatchEnd} 段）生成完成...`);
+
+                for (let i = startIndex; i < firstBatchEnd; i++) {
+                    while (!audioCacheRef.current.has(i)) {
+                        if (!isPlayingRef.current) {
+                            console.log('[PLAY] 播放已停止，停止等待');
+                            return;
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                }
+
+                console.log('[PLAY] 第一批生成完成，開始播放');
+
+                // 依序播放所有段落
+                for (let i = startIndex; i < lines.length; i++) {
                     if (!isPlayingRef.current) {
-                        console.log('[PLAY] 播放流程已被停止');
-                        return;
+                        console.log('[PLAY] 播放已停止');
+                        break;
                     }
 
-                    // 等待對應索引的 blob 準備好
-                    while (!blobQueue.has(nextPlayIndex) && !blobQueue.has('_GENERATION_COMPLETE')) {
-                        console.log(`[PLAY] 等待第 ${nextPlayIndex + 1} 個音檔生成...`);
+                    // 等待音檔準備好（檢查 ref）
+                    while (!audioCacheRef.current.has(i)) {
+                        if (!isPlayingRef.current) {
+                            console.log('[PLAY] 播放已停止，停止等待');
+                            return;
+                        }
+                        console.log(`[PLAY] 等待第 ${i + 1} 段音檔...`);
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
 
-                    const blob = blobQueue.get(nextPlayIndex);
-
+                    const blob = audioCacheRef.current.get(i);
                     if (blob) {
-                        setPlayingIndex(nextPlayIndex + 1);
-                        const isLastBlob = nextPlayIndex === lines.length - 1;
-                        const delay = isLastBlob ? 0 : 200;
-                        console.log(`[PLAY] 播放第 ${nextPlayIndex + 1}/${lines.length} 個音檔`);
+                        setCurrentPlayingLine(i);
+                        const isLastLine = i === lines.length - 1;
+                        const delay = isLastLine ? 0 : 200;
+                        console.log(`[PLAY] 播放第 ${i + 1} 段`);
                         await playBlob(blob, delay);
-                        blobQueue.delete(nextPlayIndex);
-                    } else if (blob === null) {
-                        console.warn(`[PLAY] 跳過第 ${nextPlayIndex + 1} 行（生成失敗）`);
-                        blobQueue.delete(nextPlayIndex);
+                    } else {
+                        console.warn(`[PLAY] 跳過第 ${i + 1} 段（無音檔）`);
                     }
-
-                    nextPlayIndex++;
                 }
 
-                console.log('[PLAY] 所有音檔播放完成');
+                console.log('[PLAY] 播放完成');
             };
 
             // 並行執行生成和播放
-            await Promise.all([generateBatches(), playBatches()]);
+            await Promise.all([generateTask(), playTask()]);
 
         } catch (error) {
-            console.error('[BUTTON] 播放流程錯誤:', error);
+            console.error('[PLAY_FROM] 播放錯誤:', error);
         } finally {
-            setIsPlaying(false);
             isPlayingRef.current = false;
+            setCurrentPlayingLine(null);
         }
     };
 
@@ -452,82 +514,99 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* 進度顯示 */}
-                {viewMode === 'read' && isPlaying && (
-                    <div className="mb-6 p-4 bg-white rounded-lg border-2 border-black">
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="text-center">
-                                <div className="text-sm font-medium text-black mb-1">總段落數</div>
-                                <div className="text-2xl font-bold text-black">{totalLines}</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-sm font-medium text-black mb-1">已經生成</div>
-                                <div className="text-2xl font-bold text-black">{generatedCount}</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-sm font-medium text-black mb-1">正在播放</div>
-                                <div className="text-2xl font-bold text-black">{playingIndex}</div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* 播放/暫停按鈕 - 朗讀模式 */}
-                {viewMode === 'read' && (
-                    <div className="mb-4 flex justify-center">
-                        <button
-                            onClick={handlePlayClick}
-                            disabled={!apiKey || !text.trim()}
-                            className="flex justify-center items-center p-3 rounded-lg bg-black text-white transition-colors disabled:cursor-not-allowed hover:cursor-pointer"
-                            style={(!apiKey || !text.trim()) ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
-                            title={isPlaying ? '暫停' : '播放'}
-                        >
-                            {isPlaying ? <Pause size={24} /> : <Play size={24} />}
-                        </button>
-                    </div>
-                )}
-
                 {/* 朗讀內容顯示 - 分割為 div */}
                 {viewMode === 'read' && (
                     <div className="mb-4 p-4 bg-white rounded-lg border-2 border-black min-h-60vh">
                         {text.trim() ? (
                             <div className="space-y-3">
-                                {splitText(text).map((line, index) => (
-                                    <div
-                                        key={index}
-                                        className="flex gap-3 p-3 rounded-lg border border-gray-300 bg-gray-50"
-                                    >
-                                        {/* 序號 - 正方形 */}
-                                        <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
-                                            <span className="text-sm font-medium text-gray-500">{index + 1}</span>
-                                        </div>
+                                {splitText(text).map((line, index) => {
+                                    const isGenerating = generatingLines.has(index);
+                                    const isCached = audioCache.has(index);
+                                    const isPlaying = currentPlayingLine === index;
+                                    const isFirstLine = index === 0;
+                                    const isEnabled = isCached && !isGenerating;
 
-                                        {/* 文字內容 - 佔用剩餘空間 */}
-                                        <div className="flex items-center flex-1 min-w-0">
-                                            <span className="text-black break-words">{line}</span>
-                                        </div>
+                                    // 播放按鈕：第一個段落永遠可點擊，其他段落需要已緩存或正在播放
+                                    const playButtonEnabled = !apiKey ? false : (isFirstLine || isEnabled || isPlaying);
 
-                                        {/* Rotate CCW 按鈕 - 正方形 */}
-                                        <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
-                                            <button
-                                                className="w-full h-full p-2 rounded-lg bg-black text-white hover:cursor-pointer flex items-center justify-center"
-                                                title="重做"
-                                            >
-                                                <RotateCcw size={20} />
-                                            </button>
-                                        </div>
+                                    return (
+                                        <div
+                                            key={index}
+                                            className={`flex gap-3 p-3 rounded-lg border transition-colors ${isPlaying
+                                                    ? 'border-black bg-blue-50'
+                                                    : 'border-gray-300 bg-gray-50'
+                                                }`}
+                                        >
+                                            {/* 序號 - 正方形 */}
+                                            <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                                <span className="text-sm font-medium text-gray-500">{index + 1}</span>
+                                            </div>
 
-                                        {/* 播放按鈕 - 正方形 */}
-                                        <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
-                                            <button
-                                                className="w-full h-full p-2 rounded-lg bg-black text-white hover:cursor-pointer flex items-center justify-center"
-                                                title="播放"
-                                            >
-                                                <Play size={20} />
-                                            </button>
+                                            {/* 文字內容 - 佔用剩餘空間 */}
+                                            <div className="flex items-center flex-1 min-w-0">
+                                                <span className="text-black break-words">{line}</span>
+                                            </div>
+
+                                            {/* Rotate CCW 按鈕 - 正方形 */}
+                                            <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                                <button
+                                                    onClick={() => handleRegenerateLine(index)}
+                                                    disabled={!apiKey || isGenerating}
+                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${isGenerating
+                                                            ? 'bg-gray-300 cursor-not-allowed'
+                                                            : isEnabled
+                                                                ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                        }`}
+                                                    title={isGenerating ? '生成中...' : '重新生成'}
+                                                >
+                                                    {isGenerating ? (
+                                                        <Loader2 size={20} className="animate-spin" />
+                                                    ) : (
+                                                        <RotateCcw size={20} />
+                                                    )}
+                                                </button>
+                                            </div>
+
+                                            {/* 播放按鈕 - 正方形 */}
+                                            <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                                <button
+                                                    onClick={() => handlePlayFromLine(index)}
+                                                    disabled={!playButtonEnabled}
+                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${!apiKey
+                                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                            : isGenerating
+                                                                ? 'bg-gray-300 cursor-not-allowed'
+                                                                : playButtonEnabled
+                                                                    ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                        }`}
+                                                    title={
+                                                        !apiKey
+                                                            ? '請先設定 API Key'
+                                                            : isGenerating
+                                                                ? '生成中...'
+                                                                : isPlaying
+                                                                    ? '暫停'
+                                                                    : isFirstLine
+                                                                        ? '從第一段開始播放'
+                                                                        : isCached
+                                                                            ? '從此段開始播放'
+                                                                            : '請先播放前面段落'
+                                                    }
+                                                >
+                                                    {isGenerating ? (
+                                                        <Loader2 size={20} className="animate-spin" />
+                                                    ) : isPlaying ? (
+                                                        <Pause size={20} />
+                                                    ) : (
+                                                        <Play size={20} />
+                                                    )}
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         ) : (
                             <div className="text-center text-gray-400 py-12">
@@ -544,17 +623,12 @@ export default function Home() {
                             ref={textareaRef}
                             value={text}
                             onChange={(e) => {
-                                if (!isPlaying) {
-                                    setText(e.target.value);
-                                }
+                                setText(e.target.value);
                             }}
                             placeholder="在此輸入要轉換的文字，按換行分段..."
                             suppressHydrationWarning
-                            className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-none overflow-hidden transition-all ${isPlaying
-                                ? 'text-black'
-                                : 'bg-white text-black'
-                                }`}
-                            style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '60vh' } : { minHeight: '60vh' }}
+                            className="w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-none overflow-hidden transition-all bg-white text-black"
+                            style={{ minHeight: '60vh' }}
                         />
                     </div>
                 )}
