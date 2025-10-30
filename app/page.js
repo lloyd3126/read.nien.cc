@@ -528,23 +528,46 @@ export default function Home() {
 
             console.log(`[DOWNLOAD] 合併 ${audioDataArrays.length} 個音檔，總大小: ${totalDataLength} bytes`);
 
-            // 創建合併後的音訊數據
-            const mergedAudioData = new Uint8Array(totalDataLength);
+            // 計算間隔空白的大小（200ms）
+            const silenceDurationMs = 200;
+            const silenceSamples = Math.floor((sampleRate * silenceDurationMs) / 1000);
+            const silenceBytes = silenceSamples * (bitsPerSample / 8) * numChannels;
+            const silenceData = new Uint8Array(silenceBytes).fill(0);
+
+            console.log(`[DOWNLOAD] 添加 ${silenceDurationMs}ms 間隔，每段間隔: ${silenceBytes} bytes`);
+
+            // 創建合併後的音訊數據（包含間隔）
+            // 總大小 = 所有音檔數據 + (音檔數量-1) * 間隔大小
+            const totalWithSilence = totalDataLength + (audioDataArrays.length - 1) * silenceBytes;
+            const mergedAudioData = new Uint8Array(totalWithSilence);
             let offset = 0;
-            for (const audioData of audioDataArrays) {
+
+            for (let i = 0; i < audioDataArrays.length; i++) {
+                const audioData = audioDataArrays[i];
+                // 添加音訊數據
                 mergedAudioData.set(audioData, offset);
                 offset += audioData.length;
+
+                // 如果不是最後一段，添加間隔
+                if (i < audioDataArrays.length - 1) {
+                    mergedAudioData.set(silenceData, offset);
+                    offset += silenceBytes;
+                }
             }
 
+            console.log(`[DOWNLOAD] 合併完成，總大小（含間隔）: ${totalWithSilence} bytes`);
+
+            console.log(`[DOWNLOAD] 合併完成，總大小（含間隔）: ${totalWithSilence} bytes`);
+
             // 創建新的 WAV 檔頭
-            const wavHeader = createWavHeader(totalDataLength, {
+            const wavHeader = createWavHeader(totalWithSilence, {
                 numChannels,
                 sampleRate,
                 bitsPerSample
             });
 
             // 合併檔頭和音訊數據
-            const finalWavData = new Uint8Array(wavHeader.length + totalDataLength);
+            const finalWavData = new Uint8Array(wavHeader.length + totalWithSilence);
             finalWavData.set(wavHeader, 0);
             finalWavData.set(mergedAudioData, wavHeader.length);
 
