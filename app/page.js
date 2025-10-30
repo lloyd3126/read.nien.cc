@@ -15,6 +15,7 @@ export default function Home() {
     const audioContextRef = useRef(null);
     const currentAudioRef = useRef(null);
     const isPlayingRef = useRef(false);
+    const textareaRef = useRef(null);
 
     // 初始化 API Key 從 localStorage
     useEffect(() => {
@@ -25,6 +26,19 @@ export default function Home() {
             setTempApiKey(stored);
         }
     }, []);
+
+    // 自動調整 textarea 高度
+    const adjustTextareaHeight = () => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+        }
+    };
+
+    // 監聽文本變化，自動調整高度
+    useEffect(() => {
+        adjustTextareaHeight();
+    }, [text]);
 
     // 保存 API Key
     const handleSaveApiKey = () => {
@@ -410,17 +424,17 @@ export default function Home() {
                 {/* 編輯區 */}
                 <div className="mb-4">
                     <textarea
+                        ref={textareaRef}
                         value={text}
                         onChange={(e) => setText(e.target.value)}
                         disabled={isPlaying}
                         placeholder="在此輸入要轉換的文字，按換行分段..."
                         suppressHydrationWarning
-                        rows={10}
-                        className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-y transition-all ${isPlaying
+                        className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-none overflow-hidden transition-all ${isPlaying
                             ? 'cursor-not-allowed text-black'
                             : 'bg-white text-black'
                             }`}
-                        style={isPlaying ? { backgroundColor: '#f4f4f4' } : {}}
+                        style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '120px' } : { minHeight: '120px' }}
                     />
                 </div>
             </div>
