@@ -17,6 +17,11 @@ body {
         sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scrollbar-gutter: stable;
+}
+
+body {
+    padding-left: var(--scrollbar-width, 17px);
 }
 
 #__next {

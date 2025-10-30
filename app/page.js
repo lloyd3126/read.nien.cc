@@ -434,7 +434,7 @@ export default function Home() {
                             ? 'cursor-not-allowed text-black'
                             : 'bg-white text-black'
                             }`}
-                        style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '120px' } : { minHeight: '120px' }}
+                        style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '50vh' } : { minHeight: '50vh' }}
                     />
                 </div>
             </div>
