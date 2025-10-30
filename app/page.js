@@ -416,9 +416,10 @@ export default function Home() {
                         suppressHydrationWarning
                         rows={10}
                         className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-y transition-all ${isPlaying
-                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                            ? 'cursor-not-allowed text-black'
                             : 'bg-white text-black'
                             }`}
+                        style={isPlaying ? { backgroundColor: '#f4f4f4' } : {}}
                     />
                 </div>
             </div>
