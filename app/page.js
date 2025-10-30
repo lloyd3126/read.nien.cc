@@ -1,17 +1,17 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Settings } from 'lucide-react';
+import { Play, Pause, Settings, BookHeadphones, SquarePen, RotateCcw } from 'lucide-react';
 
 export default function Home() {
     const [text, setText] = useState('');
     const [isPlaying, setIsPlaying] = useState(false);
-    const [showModal, setShowModal] = useState(false);
     const [apiKey, setApiKey] = useState('');
     const [tempApiKey, setTempApiKey] = useState('');
     const [totalLines, setTotalLines] = useState(0);
     const [generatedCount, setGeneratedCount] = useState(0);
     const [playingIndex, setPlayingIndex] = useState(0);
+    const [viewMode, setViewMode] = useState('edit'); // 'edit', 'read', 'settings'
     const audioContextRef = useRef(null);
     const currentAudioRef = useRef(null);
     const isPlayingRef = useRef(false);
@@ -45,7 +45,6 @@ export default function Home() {
         console.log('[SETTINGS] 保存 API Key');
         localStorage.setItem('GEMINI_API_KEY', tempApiKey);
         setApiKey(tempApiKey);
-        setShowModal(false);
     };
 
     // 清除 API Key
@@ -413,29 +412,48 @@ export default function Home() {
                         <button
                             onClick={() => {
                                 setTempApiKey(apiKey);
-                                setShowModal(true);
+                                setViewMode('settings');
                             }}
-                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black text-white transition-colors hover:cursor-pointer"
+                            className={`flex-1 flex justify-center items-center p-3 rounded-lg transition-colors hover:cursor-pointer ${viewMode === 'settings'
+                                ? 'bg-black text-white'
+                                : ''
+                                }`}
+                            style={viewMode !== 'settings' ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
                             title="設定"
                         >
                             <Settings size={24} />
                         </button>
 
-                        {/* 播放/暫停按鈕 */}
+                        {/* Square Pen 按鈕 */}
                         <button
-                            onClick={handlePlayClick}
-                            disabled={!apiKey || !text.trim()}
-                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black text-white transition-colors disabled:cursor-not-allowed hover:cursor-pointer"
-                            style={(!apiKey || !text.trim()) ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
-                            title={isPlaying ? '暫停' : '播放'}
+                            onClick={() => setViewMode('edit')}
+                            className={`flex-1 flex justify-center items-center p-3 rounded-lg transition-colors hover:cursor-pointer ${viewMode === 'edit'
+                                ? 'bg-black text-white'
+                                : ''
+                                }`}
+                            style={viewMode !== 'edit' ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
+                            title="編輯模式"
                         >
-                            {isPlaying ? <Pause size={24} /> : <Play size={24} />}
+                            <SquarePen size={24} />
+                        </button>
+
+                        {/* Book Headphones 按鈕 */}
+                        <button
+                            onClick={() => setViewMode('read')}
+                            className={`flex-1 flex justify-center items-center p-3 rounded-lg transition-colors hover:cursor-pointer ${viewMode === 'read'
+                                ? 'bg-black text-white'
+                                : ''
+                                }`}
+                            style={viewMode !== 'read' ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
+                            title="朗讀模式"
+                        >
+                            <BookHeadphones size={24} />
                         </button>
                     </div>
                 </div>
 
                 {/* 進度顯示 */}
-                {isPlaying && (
+                {viewMode === 'read' && isPlaying && (
                     <div className="mb-6 p-4 bg-white rounded-lg border-2 border-black">
                         <div className="grid grid-cols-3 gap-4">
                             <div className="text-center">
@@ -454,31 +472,96 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* 編輯區 */}
-                <div className="mb-4">
-                    <textarea
-                        ref={textareaRef}
-                        value={text}
-                        onChange={(e) => {
-                            if (!isPlaying) {
-                                setText(e.target.value);
-                            }
-                        }}
-                        placeholder="在此輸入要轉換的文字，按換行分段..."
-                        suppressHydrationWarning
-                        className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-none overflow-hidden transition-all ${isPlaying
-                            ? 'text-black'
-                            : 'bg-white text-black'
-                            }`}
-                        style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '60vh' } : { minHeight: '60vh' }}
-                    />
-                </div>
-            </div>
+                {/* 播放/暫停按鈕 - 朗讀模式 */}
+                {viewMode === 'read' && (
+                    <div className="mb-4 flex justify-center">
+                        <button
+                            onClick={handlePlayClick}
+                            disabled={!apiKey || !text.trim()}
+                            className="flex justify-center items-center p-3 rounded-lg bg-black text-white transition-colors disabled:cursor-not-allowed hover:cursor-pointer"
+                            style={(!apiKey || !text.trim()) ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
+                            title={isPlaying ? '暫停' : '播放'}
+                        >
+                            {isPlaying ? <Pause size={24} /> : <Play size={24} />}
+                        </button>
+                    </div>
+                )}
 
-            {/* 設定模態框 */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+                {/* 朗讀內容顯示 - 分割為 div */}
+                {viewMode === 'read' && (
+                    <div className="mb-4 p-4 bg-white rounded-lg border-2 border-black min-h-60vh">
+                        {text.trim() ? (
+                            <div className="space-y-3">
+                                {splitText(text).map((line, index) => (
+                                    <div
+                                        key={index}
+                                        className="flex gap-3 p-3 rounded-lg border border-gray-300 bg-gray-50"
+                                    >
+                                        {/* 序號 - 正方形 */}
+                                        <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                            <span className="text-sm font-medium text-gray-500">{index + 1}</span>
+                                        </div>
+
+                                        {/* 文字內容 - 佔用剩餘空間 */}
+                                        <div className="flex items-center flex-1 min-w-0">
+                                            <span className="text-black break-words">{line}</span>
+                                        </div>
+
+                                        {/* Rotate CCW 按鈕 - 正方形 */}
+                                        <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                            <button
+                                                className="w-full h-full p-2 rounded-lg bg-black text-white hover:cursor-pointer flex items-center justify-center"
+                                                title="重做"
+                                            >
+                                                <RotateCcw size={20} />
+                                            </button>
+                                        </div>
+
+                                        {/* 播放按鈕 - 正方形 */}
+                                        <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                            <button
+                                                className="w-full h-full p-2 rounded-lg bg-black text-white hover:cursor-pointer flex items-center justify-center"
+                                                title="播放"
+                                            >
+                                                <Play size={20} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center text-gray-400 py-12">
+                                還沒有文字內容，請先切換到編輯模式輸入文字
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* 編輯區 */}
+                {viewMode === 'edit' && (
+                    <div className="mb-4">
+                        <textarea
+                            ref={textareaRef}
+                            value={text}
+                            onChange={(e) => {
+                                if (!isPlaying) {
+                                    setText(e.target.value);
+                                }
+                            }}
+                            placeholder="在此輸入要轉換的文字，按換行分段..."
+                            suppressHydrationWarning
+                            className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-none overflow-hidden transition-all ${isPlaying
+                                ? 'text-black'
+                                : 'bg-white text-black'
+                                }`}
+                            style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '60vh' } : { minHeight: '60vh' }}
+                        />
+                    </div>
+                )}
+
+                {/* 設定區 */}
+                {viewMode === 'settings' && (
+                    <div className="mb-4 p-6 bg-white rounded-lg border-2 border-black">
                         <h2 className="text-2xl font-bold mb-4 text-black">API 金鑰設定</h2>
 
                         <div className="mb-4 p-3 bg-gray-100 border border-black rounded text-sm text-black">
@@ -505,21 +588,24 @@ export default function Home() {
                                 清除
                             </button>
                             <button
-                                onClick={() => setShowModal(false)}
+                                onClick={() => setViewMode('edit')}
                                 className="flex-1 px-4 py-2 bg-gray-300 text-black rounded-lg hover:bg-gray-400 transition-colors font-medium"
                             >
                                 取消
                             </button>
                             <button
-                                onClick={handleSaveApiKey}
+                                onClick={() => {
+                                    handleSaveApiKey();
+                                    setViewMode('edit');
+                                }}
                                 className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
                             >
                                 保存
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }
