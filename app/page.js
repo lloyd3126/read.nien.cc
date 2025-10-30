@@ -368,7 +368,7 @@ export default function Home() {
                                 setTempApiKey(apiKey);
                                 setShowModal(true);
                             }}
-                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black hover:bg-gray-900 text-white transition-colors"
+                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black text-white transition-colors hover:cursor-pointer"
                             title="設定"
                         >
                             <Settings size={24} />
@@ -377,8 +377,9 @@ export default function Home() {
                         {/* 播放/暫停按鈕 */}
                         <button
                             onClick={handlePlayClick}
-                            disabled={!apiKey}
-                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black hover:bg-gray-900 text-white transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                            disabled={!apiKey || !text.trim()}
+                            className="flex-1 flex justify-center items-center p-3 rounded-lg bg-black text-white transition-colors disabled:cursor-not-allowed hover:cursor-pointer"
+                            style={(!apiKey || !text.trim()) ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
                             title={isPlaying ? '暫停' : '播放'}
                         >
                             {isPlaying ? <Pause size={24} /> : <Play size={24} />}
