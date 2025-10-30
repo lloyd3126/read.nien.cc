@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Settings, BookHeadphones, SquarePen, RotateCcw, Loader2 } from 'lucide-react';
+import { Play, Pause, Settings, BookHeadphones, SquarePen, RotateCcw, Loader2, Download } from 'lucide-react';
 
 export default function Home() {
     const [text, setText] = useState('');
@@ -318,7 +318,7 @@ export default function Home() {
             return;
         }
 
-        // 如果正在播放該段，則暫停
+        // 如果正在播放該段,則暫停
         if (currentPlayingLine === startIndex && isPlayingRef.current) {
             console.log('[PLAY_FROM] 暫停播放');
             isPlayingRef.current = false;
@@ -470,6 +470,104 @@ export default function Home() {
         }
     };
 
+    // 合併並下載所有音檔
+    const handleDownloadAll = async () => {
+        console.log('[DOWNLOAD] 開始下載所有音檔');
+
+        const lines = splitText(text);
+        if (lines.length === 0) {
+            alert('沒有文字內容可以下載');
+            return;
+        }
+
+        // 檢查是否所有段落都已生成
+        const missingLines = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (!audioCacheRef.current.has(i)) {
+                missingLines.push(i + 1);
+            }
+        }
+
+        if (missingLines.length > 0) {
+            alert(`請先生成所有音檔再下載\n缺少第 ${missingLines.join(', ')} 段`);
+            return;
+        }
+
+        try {
+            console.log('[DOWNLOAD] 開始合併音檔...');
+
+            // 讀取所有 WAV 檔案的音訊數據
+            const audioDataArrays = [];
+            let totalDataLength = 0;
+            let sampleRate = 24000;
+            let numChannels = 1;
+            let bitsPerSample = 16;
+
+            for (let i = 0; i < lines.length; i++) {
+                const blob = audioCacheRef.current.get(i);
+                if (!blob) continue;
+
+                // 讀取 blob 為 ArrayBuffer
+                const arrayBuffer = await blob.arrayBuffer();
+                const dataView = new DataView(arrayBuffer);
+
+                // 解析 WAV 檔頭（前 44 bytes）
+                if (i === 0) {
+                    // 從第一個檔案讀取參數
+                    numChannels = dataView.getUint16(22, true);
+                    sampleRate = dataView.getUint32(24, true);
+                    bitsPerSample = dataView.getUint16(34, true);
+                    console.log(`[DOWNLOAD] 音訊參數: ${numChannels} 聲道, ${sampleRate}Hz, ${bitsPerSample}bit`);
+                }
+
+                // 提取音訊數據（跳過 44 bytes 檔頭）
+                const audioData = new Uint8Array(arrayBuffer, 44);
+                audioDataArrays.push(audioData);
+                totalDataLength += audioData.length;
+            }
+
+            console.log(`[DOWNLOAD] 合併 ${audioDataArrays.length} 個音檔，總大小: ${totalDataLength} bytes`);
+
+            // 創建合併後的音訊數據
+            const mergedAudioData = new Uint8Array(totalDataLength);
+            let offset = 0;
+            for (const audioData of audioDataArrays) {
+                mergedAudioData.set(audioData, offset);
+                offset += audioData.length;
+            }
+
+            // 創建新的 WAV 檔頭
+            const wavHeader = createWavHeader(totalDataLength, {
+                numChannels,
+                sampleRate,
+                bitsPerSample
+            });
+
+            // 合併檔頭和音訊數據
+            const finalWavData = new Uint8Array(wavHeader.length + totalDataLength);
+            finalWavData.set(wavHeader, 0);
+            finalWavData.set(mergedAudioData, wavHeader.length);
+
+            // 創建 Blob 並下載
+            const finalBlob = new Blob([finalWavData], { type: 'audio/wav' });
+            const url = URL.createObjectURL(finalBlob);
+
+            // 創建下載連結
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tts-audio-${Date.now()}.wav`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            console.log('[DOWNLOAD] 下載完成');
+        } catch (error) {
+            console.error('[DOWNLOAD] 下載錯誤:', error);
+            alert(`下載失敗: ${error.message}`);
+        }
+    };
+
     return (
         <div className="!p-10">
             <div className="w-full">
@@ -524,133 +622,160 @@ export default function Home() {
 
                 {/* 朗讀內容顯示 - 分割為 div */}
                 {viewMode === 'read' && (
-                    <div className="mb-4 p-4 bg-white rounded-lg border-2 border-black min-h-60vh">
-                        {text.trim() ? (
-                            <div className="space-y-3">
-                                {splitText(text).map((line, index) => {
-                                    const isGenerating = generatingLines.has(index);
-                                    const isCached = audioCache.has(index);
-                                    const isPlaying = currentPlayingLine === index;
-                                    const isFirstLine = index === 0;
-                                    const isEnabled = isCached && !isGenerating;
+                    <div className="mb-4">
+                        <div className="p-4 bg-white rounded-lg border-2 border-black min-h-60vh mb-4">
+                            {text.trim() ? (
+                                <div className="space-y-3">
+                                    {splitText(text).map((line, index) => {
+                                        const isGenerating = generatingLines.has(index);
+                                        const isCached = audioCache.has(index);
+                                        const isPlaying = currentPlayingLine === index;
+                                        const isFirstLine = index === 0;
+                                        const isEnabled = isCached && !isGenerating;
 
-                                    // 檢查是否有任何段落正在生成
-                                    const hasAnyGenerating = generatingLines.size > 0;
-                                    // 檢查是否有其他段落正在播放
-                                    const isAnyOtherPlaying = currentPlayingLine !== null && currentPlayingLine !== index;
+                                        // 檢查是否有任何段落正在生成
+                                        const hasAnyGenerating = generatingLines.size > 0;
+                                        // 檢查是否有其他段落正在播放
+                                        const isAnyOtherPlaying = currentPlayingLine !== null && currentPlayingLine !== index;
 
-                                    // 重新生成按鈕：只有已緩存的段落才能重新生成，且不能在播放時操作
-                                    const regenerateButtonEnabled = !apiKey || isPlayingRef.current || !isCached ? false : !isGenerating;
+                                        // 重新生成按鈕：只有已緩存的段落才能重新生成，且不能在播放時操作
+                                        const regenerateButtonEnabled = !apiKey || isPlayingRef.current || !isCached ? false : !isGenerating;
 
-                                    // 播放按鈕邏輯：
-                                    // 1. 如果正在播放該段 → 可點擊（暫停）
-                                    // 2. 如果有任何段落正在生成 → 全部禁用
-                                    // 3. 如果有其他段落正在播放 → 禁用
-                                    // 4. 第一個段落永遠可點擊（引導使用者從這裡開始）
-                                    // 5. 其他段落需要已緩存才能點擊
-                                    const playButtonEnabled = !apiKey
-                                        ? false
-                                        : isPlaying
-                                            ? true
-                                            : hasAnyGenerating
-                                                ? false
-                                                : isAnyOtherPlaying
+                                        // 播放按鈕邏輯：
+                                        // 1. 如果正在播放該段 → 可點擊（暫停）
+                                        // 2. 如果有任何段落正在生成 → 全部禁用
+                                        // 3. 如果有其他段落正在播放 → 禁用
+                                        // 4. 第一個段落永遠可點擊（引導使用者從這裡開始）
+                                        // 5. 其他段落需要已緩存才能點擊
+                                        const playButtonEnabled = !apiKey
+                                            ? false
+                                            : isPlaying
+                                                ? true
+                                                : hasAnyGenerating
                                                     ? false
-                                                    : isFirstLine
-                                                        ? true
-                                                        : isCached;
+                                                    : isAnyOtherPlaying
+                                                        ? false
+                                                        : isFirstLine
+                                                            ? true
+                                                            : isCached;
 
-                                    return (
-                                        <div
-                                            key={index}
-                                            className={`flex gap-3 p-3 rounded-lg border transition-colors ${isPlaying
-                                                ? 'border-yellow-500 bg-yellow-50'
-                                                : 'border-gray-300 bg-white'
-                                                }`}
-                                        >
-                                            {/* 序號 - 正方形 */}
-                                            <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
-                                                <span className="text-sm font-medium text-gray-500">{index + 1}</span>
-                                            </div>
+                                        return (
+                                            <div
+                                                key={index}
+                                                className={`flex gap-3 p-3 rounded-lg border transition-colors ${isPlaying
+                                                    ? 'border-yellow-500 bg-yellow-50'
+                                                    : 'border-gray-300 bg-white'
+                                                    }`}
+                                            >
+                                                {/* 序號 - 正方形 */}
+                                                <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                                    <span className="text-sm font-medium text-gray-500">{index + 1}</span>
+                                                </div>
 
-                                            {/* 文字內容 - 佔用剩餘空間 */}
-                                            <div className="flex items-center flex-1 min-w-0">
-                                                <span className="text-black break-words">{line}</span>
-                                            </div>
+                                                {/* 文字內容 - 佔用剩餘空間 */}
+                                                <div className="flex items-center flex-1 min-w-0">
+                                                    <span className="text-black break-words">{line}</span>
+                                                </div>
 
-                                            {/* Rotate CCW 按鈕 - 正方形 */}
-                                            <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
-                                                <button
-                                                    onClick={() => handleRegenerateLine(index)}
-                                                    disabled={!regenerateButtonEnabled}
-                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${regenerateButtonEnabled
-                                                        ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
-                                                        : 'cursor-not-allowed'
-                                                        }`}
-                                                    style={!regenerateButtonEnabled ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
-                                                    title={
-                                                        !apiKey
-                                                            ? '請先設定 API Key'
-                                                            : isPlayingRef.current
-                                                                ? '播放中無法重新生成'
-                                                                : !isCached
-                                                                    ? '請先生成音檔'
-                                                                    : isGenerating
-                                                                        ? '生成中...'
-                                                                        : '重新生成'
-                                                    }
-                                                >
-                                                    {isGenerating ? (
-                                                        <Loader2 size={20} className="animate-spin" />
-                                                    ) : (
-                                                        <RotateCcw size={20} />
-                                                    )}
-                                                </button>
-                                            </div>
-
-                                            {/* 播放按鈕 - 正方形 */}
-                                            <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
-                                                <button
-                                                    onClick={() => handlePlayFromLine(index)}
-                                                    disabled={!playButtonEnabled}
-                                                    className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${isPlaying
-                                                        ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
-                                                        : playButtonEnabled
+                                                {/* Rotate CCW 按鈕 - 正方形 */}
+                                                <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                                    <button
+                                                        onClick={() => handleRegenerateLine(index)}
+                                                        disabled={!regenerateButtonEnabled}
+                                                        className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${regenerateButtonEnabled
                                                             ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
                                                             : 'cursor-not-allowed'
-                                                        }`}
-                                                    style={!playButtonEnabled ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
-                                                    title={
-                                                        !apiKey
-                                                            ? '請先設定 API Key'
-                                                            : isPlaying
-                                                                ? '暫停'
-                                                                : hasAnyGenerating
-                                                                    ? '生成中，請稍候...'
-                                                                    : isAnyOtherPlaying
-                                                                        ? '其他段落播放中'
-                                                                        : isFirstLine
-                                                                            ? '從第一段開始播放'
-                                                                            : isCached
-                                                                                ? '從此段開始播放'
-                                                                                : '請先從第一段開始播放'
-                                                    }
-                                                >
-                                                    {isPlaying ? (
-                                                        <Pause size={20} />
-                                                    ) : (
-                                                        <Play size={20} />
-                                                    )}
-                                                </button>
+                                                            }`}
+                                                        style={!regenerateButtonEnabled ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
+                                                        title={
+                                                            !apiKey
+                                                                ? '請先設定 API Key'
+                                                                : isPlayingRef.current
+                                                                    ? '播放中無法重新生成'
+                                                                    : !isCached
+                                                                        ? '請先生成音檔'
+                                                                        : isGenerating
+                                                                            ? '生成中...'
+                                                                            : '重新生成'
+                                                        }
+                                                    >
+                                                        {isGenerating ? (
+                                                            <Loader2 size={20} className="animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw size={20} />
+                                                        )}
+                                                    </button>
+                                                </div>
+
+                                                {/* 播放按鈕 - 正方形 */}
+                                                <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
+                                                    <button
+                                                        onClick={() => handlePlayFromLine(index)}
+                                                        disabled={!playButtonEnabled}
+                                                        className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${isPlaying
+                                                            ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                            : playButtonEnabled
+                                                                ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                                : 'cursor-not-allowed'
+                                                            }`}
+                                                        style={!playButtonEnabled ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
+                                                        title={
+                                                            !apiKey
+                                                                ? '請先設定 API Key'
+                                                                : isPlaying
+                                                                    ? '暫停'
+                                                                    : hasAnyGenerating
+                                                                        ? '生成中，請稍候...'
+                                                                        : isAnyOtherPlaying
+                                                                            ? '其他段落播放中'
+                                                                            : isFirstLine
+                                                                                ? '從第一段開始播放'
+                                                                                : isCached
+                                                                                    ? '從此段開始播放'
+                                                                                    : '請先從第一段開始播放'
+                                                        }
+                                                    >
+                                                        {isPlaying ? (
+                                                            <Pause size={20} />
+                                                        ) : (
+                                                            <Play size={20} />
+                                                        )}
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        ) : (
-                            <div className="text-center text-gray-400 py-12">
-                                還沒有文字內容，請先切換到編輯模式輸入文字
-                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="text-center text-gray-400 py-12">
+                                    還沒有文字內容，請先切換到編輯模式輸入文字
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 下載按鈕 */}
+                        {text.trim() && (
+                            <button
+                                onClick={handleDownloadAll}
+                                disabled={!apiKey || isPlayingRef.current || generatingLines.size > 0}
+                                className={`w-full p-4 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium ${!apiKey || isPlayingRef.current || generatingLines.size > 0
+                                    ? 'cursor-not-allowed'
+                                    : 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                    }`}
+                                style={!apiKey || isPlayingRef.current || generatingLines.size > 0 ? { backgroundColor: '#d9d9d9', color: '#fff' } : {}}
+                                title={
+                                    !apiKey
+                                        ? '請先設定 API Key'
+                                        : isPlayingRef.current
+                                            ? '播放中無法下載'
+                                            : generatingLines.size > 0
+                                                ? '生成中，請稍候...'
+                                                : '下載所有音檔（需先生成完所有段落）'
+                                }
+                            >
+                                <Download size={24} />
+                                <span>下載合併音檔</span>
+                            </button>
                         )}
                     </div>
                 )}
