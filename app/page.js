@@ -459,12 +459,15 @@ export default function Home() {
                     <textarea
                         ref={textareaRef}
                         value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        disabled={isPlaying}
+                        onChange={(e) => {
+                            if (!isPlaying) {
+                                setText(e.target.value);
+                            }
+                        }}
                         placeholder="在此輸入要轉換的文字，按換行分段..."
                         suppressHydrationWarning
                         className={`w-full p-4 rounded-lg border-2 border-black focus:border-black focus:outline-none resize-none overflow-hidden transition-all ${isPlaying
-                            ? 'cursor-not-allowed text-black'
+                            ? 'text-black'
                             : 'bg-white text-black'
                             }`}
                         style={isPlaying ? { backgroundColor: '#f4f4f4', minHeight: '60vh' } : { minHeight: '60vh' }}
