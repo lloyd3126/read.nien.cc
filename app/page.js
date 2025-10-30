@@ -526,15 +526,38 @@ export default function Home() {
                                     const isFirstLine = index === 0;
                                     const isEnabled = isCached && !isGenerating;
 
-                                    // 播放按鈕：第一個段落永遠可點擊，其他段落需要已緩存或正在播放
-                                    const playButtonEnabled = !apiKey ? false : (isFirstLine || isEnabled || isPlaying);
+                                    // 檢查是否有任何段落正在生成
+                                    const hasAnyGenerating = generatingLines.size > 0;
+                                    // 檢查是否有其他段落正在播放
+                                    const isAnyOtherPlaying = currentPlayingLine !== null && currentPlayingLine !== index;
+
+                                    // 重新生成按鈕：只有已緩存的段落才能重新生成，且不能在播放時操作
+                                    const regenerateButtonEnabled = !apiKey || isPlayingRef.current || !isCached ? false : !isGenerating;
+
+                                    // 播放按鈕邏輯：
+                                    // 1. 如果有任何段落正在生成 → 全部禁用
+                                    // 2. 如果正在播放該段 → 可點擊（暫停）
+                                    // 3. 如果有其他段落正在播放 → 禁用
+                                    // 4. 第一個段落永遠可點擊（引導使用者從這裡開始）
+                                    // 5. 其他段落需要已緩存才能點擊
+                                    const playButtonEnabled = !apiKey
+                                        ? false
+                                        : hasAnyGenerating
+                                            ? false
+                                            : isPlaying
+                                                ? true
+                                                : isAnyOtherPlaying
+                                                    ? false
+                                                    : isFirstLine
+                                                        ? true
+                                                        : isCached;
 
                                     return (
                                         <div
                                             key={index}
                                             className={`flex gap-3 p-3 rounded-lg border transition-colors ${isPlaying
-                                                    ? 'border-black bg-blue-50'
-                                                    : 'border-gray-300 bg-gray-50'
+                                                ? 'border-black bg-blue-50'
+                                                : 'border-gray-300 bg-gray-50'
                                                 }`}
                                         >
                                             {/* 序號 - 正方形 */}
@@ -551,14 +574,24 @@ export default function Home() {
                                             <div className="flex items-center justify-center w-12 h-12 flex-shrink-0">
                                                 <button
                                                     onClick={() => handleRegenerateLine(index)}
-                                                    disabled={!apiKey || isGenerating}
+                                                    disabled={!regenerateButtonEnabled}
                                                     className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${isGenerating
-                                                            ? 'bg-gray-300 cursor-not-allowed'
-                                                            : isEnabled
-                                                                ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
-                                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                        ? 'bg-gray-300 cursor-not-allowed'
+                                                        : regenerateButtonEnabled
+                                                            ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                                         }`}
-                                                    title={isGenerating ? '生成中...' : '重新生成'}
+                                                    title={
+                                                        !apiKey
+                                                            ? '請先設定 API Key'
+                                                            : isPlayingRef.current
+                                                                ? '播放中無法重新生成'
+                                                                : !isCached
+                                                                    ? '請先生成音檔'
+                                                                    : isGenerating
+                                                                        ? '生成中...'
+                                                                        : '重新生成'
+                                                    }
                                                 >
                                                     {isGenerating ? (
                                                         <Loader2 size={20} className="animate-spin" />
@@ -574,30 +607,30 @@ export default function Home() {
                                                     onClick={() => handlePlayFromLine(index)}
                                                     disabled={!playButtonEnabled}
                                                     className={`w-full h-full p-2 rounded-lg flex items-center justify-center transition-colors ${!apiKey
-                                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                            : isGenerating
-                                                                ? 'bg-gray-300 cursor-not-allowed'
-                                                                : playButtonEnabled
-                                                                    ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
-                                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                        : hasAnyGenerating
+                                                            ? 'bg-gray-300 cursor-not-allowed'
+                                                            : playButtonEnabled
+                                                                ? 'bg-black text-white hover:bg-gray-800 hover:cursor-pointer'
+                                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                                         }`}
                                                     title={
                                                         !apiKey
                                                             ? '請先設定 API Key'
-                                                            : isGenerating
-                                                                ? '生成中...'
+                                                            : hasAnyGenerating
+                                                                ? '生成中，請稍候...'
                                                                 : isPlaying
                                                                     ? '暫停'
-                                                                    : isFirstLine
-                                                                        ? '從第一段開始播放'
-                                                                        : isCached
-                                                                            ? '從此段開始播放'
-                                                                            : '請先播放前面段落'
+                                                                    : isAnyOtherPlaying
+                                                                        ? '其他段落播放中'
+                                                                        : isFirstLine
+                                                                            ? '從第一段開始播放'
+                                                                            : isCached
+                                                                                ? '從此段開始播放'
+                                                                                : '請先從第一段開始播放'
                                                     }
                                                 >
-                                                    {isGenerating ? (
-                                                        <Loader2 size={20} className="animate-spin" />
-                                                    ) : isPlaying ? (
+                                                    {isPlaying ? (
                                                         <Pause size={20} />
                                                     ) : (
                                                         <Play size={20} />
