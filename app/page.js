@@ -295,71 +295,104 @@ export default function Home() {
         isPlayingRef.current = true;
 
         try {
-            console.log('[BUTTON] 開始邊生成邊播放語音，每批 5 段...');
+            console.log('[BUTTON] 開始邊生成邊播放語音（並行執行），每批 5 段...');
             const CONCURRENT_BATCH_SIZE = 5;
             let generatedSoFar = 0;
 
-            for (let i = 0; i < lines.length; i += CONCURRENT_BATCH_SIZE) {
-                if (!isPlayingRef.current) {
-                    console.log('[BUTTON] 流程已被停止');
-                    break;
-                }
+            // 用於存儲已生成但未播放的 blobs
+            const blobQueue = new Map();
+            let nextPlayIndex = 0;
 
-                const batchEnd = Math.min(i + CONCURRENT_BATCH_SIZE, lines.length);
-                const batch = lines.slice(i, batchEnd);
-                console.log(`[BUTTON] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批：開始並發生成第 ${i + 1}-${batchEnd}/${lines.length} 行（共 ${batch.length} 段）`);
+            // 生成任務隊列
+            const generateBatches = async () => {
+                for (let i = 0; i < lines.length; i += CONCURRENT_BATCH_SIZE) {
+                    if (!isPlayingRef.current) {
+                        console.log('[GENERATE] 生成流程已被停止');
+                        break;
+                    }
 
-                // 並發生成這一批文本
-                const batchPromises = batch.map((line, batchIndex) => {
-                    const lineIndex = i + batchIndex;
-                    console.log(`[BUTTON] 發起請求：第 ${lineIndex + 1}/${lines.length} 行: ${line}`);
-                    return textToSpeech(line)
-                        .then((blob) => {
-                            if (blob) {
-                                console.log(`[BUTTON] 第 ${lineIndex + 1} 行生成完成，大小: ${blob.size} bytes`);
-                                generatedSoFar++;
-                                setGeneratedCount(generatedSoFar);
-                                return { index: lineIndex, blob };
-                            } else {
-                                console.warn(`[BUTTON] 第 ${lineIndex + 1} 行生成失敗`);
+                    const batchEnd = Math.min(i + CONCURRENT_BATCH_SIZE, lines.length);
+                    const batch = lines.slice(i, batchEnd);
+                    console.log(`[GENERATE] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批：開始並發生成第 ${i + 1}-${batchEnd}/${lines.length} 行（共 ${batch.length} 段）`);
+
+                    // 並發生成這一批文本
+                    const batchPromises = batch.map((line, batchIndex) => {
+                        const lineIndex = i + batchIndex;
+                        console.log(`[GENERATE] 發起請求：第 ${lineIndex + 1}/${lines.length} 行: ${line}`);
+                        return textToSpeech(line)
+                            .then((blob) => {
+                                if (blob) {
+                                    console.log(`[GENERATE] 第 ${lineIndex + 1} 行生成完成，大小: ${blob.size} bytes`);
+                                    generatedSoFar++;
+                                    setGeneratedCount(generatedSoFar);
+                                    return { index: lineIndex, blob };
+                                } else {
+                                    console.warn(`[GENERATE] 第 ${lineIndex + 1} 行生成失敗`);
+                                    generatedSoFar++;
+                                    setGeneratedCount(generatedSoFar);
+                                    return { index: lineIndex, blob: null };
+                                }
+                            })
+                            .catch((error) => {
+                                console.error(`[GENERATE] 第 ${lineIndex + 1} 行生成錯誤:`, error);
                                 generatedSoFar++;
                                 setGeneratedCount(generatedSoFar);
                                 return { index: lineIndex, blob: null };
-                            }
-                        })
-                        .catch((error) => {
-                            console.error(`[BUTTON] 第 ${lineIndex + 1} 行生成錯誤:`, error);
-                            generatedSoFar++;
-                            setGeneratedCount(generatedSoFar);
-                            return { index: lineIndex, blob: null };
-                        });
-                });
+                            });
+                    });
 
-                // 等待這一批全部完成
-                const batchResults = await Promise.all(batchPromises);
-                console.log(`[BUTTON] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批生成完成`);
+                    // 等待這一批全部完成
+                    const batchResults = await Promise.all(batchPromises);
+                    console.log(`[GENERATE] 第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批生成完成`);
 
-                // 播放這一批的音頻（按照原始順序）
-                console.log(`[BUTTON] 開始播放第 ${Math.floor(i / CONCURRENT_BATCH_SIZE) + 1} 批...`);
-                for (const result of batchResults) {
+                    // 將結果存入隊列
+                    for (const result of batchResults) {
+                        blobQueue.set(result.index, result.blob);
+                    }
+                }
+
+                // 標記生成完成
+                blobQueue.set('_GENERATION_COMPLETE', true);
+                console.log('[GENERATE] 所有音檔生成完成');
+            };
+
+            // 播放任務隊列
+            const playBatches = async () => {
+                while (nextPlayIndex < lines.length) {
                     if (!isPlayingRef.current) {
-                        console.log('[BUTTON] 播放已被停止');
+                        console.log('[PLAY] 播放流程已被停止');
                         return;
                     }
 
-                    if (result.blob) {
-                        setPlayingIndex(result.index + 1);
-                        const isLastBlob = result.index === lines.length - 1;
-                        const delay = isLastBlob ? 0 : 200;
-                        console.log(`[BUTTON] 播放第 ${result.index + 1}/${lines.length} 個音檔`);
-                        await playBlob(result.blob, delay);
-                    } else {
-                        console.warn(`[BUTTON] 跳過第 ${result.index + 1} 行（生成失敗）`);
+                    // 等待對應索引的 blob 準備好
+                    while (!blobQueue.has(nextPlayIndex) && !blobQueue.has('_GENERATION_COMPLETE')) {
+                        console.log(`[PLAY] 等待第 ${nextPlayIndex + 1} 個音檔生成...`);
+                        await new Promise(resolve => setTimeout(resolve, 100));
                     }
-                }
-            }
 
-            console.log('[BUTTON] 所有音檔播放完成');
+                    const blob = blobQueue.get(nextPlayIndex);
+
+                    if (blob) {
+                        setPlayingIndex(nextPlayIndex + 1);
+                        const isLastBlob = nextPlayIndex === lines.length - 1;
+                        const delay = isLastBlob ? 0 : 200;
+                        console.log(`[PLAY] 播放第 ${nextPlayIndex + 1}/${lines.length} 個音檔`);
+                        await playBlob(blob, delay);
+                        blobQueue.delete(nextPlayIndex);
+                    } else if (blob === null) {
+                        console.warn(`[PLAY] 跳過第 ${nextPlayIndex + 1} 行（生成失敗）`);
+                        blobQueue.delete(nextPlayIndex);
+                    }
+
+                    nextPlayIndex++;
+                }
+
+                console.log('[PLAY] 所有音檔播放完成');
+            };
+
+            // 並行執行生成和播放
+            await Promise.all([generateBatches(), playBatches()]);
+
         } catch (error) {
             console.error('[BUTTON] 播放流程錯誤:', error);
         } finally {
